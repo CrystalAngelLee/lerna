@@ -4,8 +4,9 @@ import log from "npmlog";
 // Currently external until the usage of LERNA_MODULE_DATA can be refactored
 const createCmd = require("@lerna/create/command");
 
+// CR-NOTE: 本地包加载-../../tsconfig.base.json
 // Bundled
-import { lernaCLI } from "@lerna/core";
+import { lernaCLI } from "@lerna/core"; // CR-NOTE: libs/core/src/lib/cli.ts
 import changedCmd from "@lerna/commands/changed/command";
 import cleanCmd from "@lerna/commands/clean/command";
 import diffCmd from "@lerna/commands/diff/command";
@@ -31,6 +32,11 @@ module.exports = function main(argv: NodeJS.Process["argv"]) {
   };
 
   const cli = lernaCLI()
+    /**
+     * CR-NOTE：命令
+     * I: .command('init [name]', 'Do init a project', (yargs) => {}, (argv) => {})
+     * II: .command({})
+     */
     .command(addCachingCmd)
     .command(changedCmd)
     .command(cleanCmd)
@@ -49,6 +55,7 @@ module.exports = function main(argv: NodeJS.Process["argv"]) {
 
   applyLegacyPackageManagementCommands(cli);
 
+  // CR-NOTE: 由于 cli 其他方法均放置到微任务中执行，此处 cli.parse 最先执行 传递所需参数
   return cli.parse(argv, context);
 };
 
