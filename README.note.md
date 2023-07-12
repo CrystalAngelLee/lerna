@@ -1,5 +1,7 @@
 # Lerna Note
-> 笔记查询 CR-NOTE
+> - 笔记查询 CR-NOTE
+>
+> - [Require 源码解读](https://www.ruanyifeng.com/blog/2015/05/require.html)
 
 **入口文件路径：** `packages/lerna/src/cli.js`
 
@@ -65,13 +67,19 @@ const pkgDir = require('pkg-dir');
 
 module.exports = filename => {
 	const normalizedFilename = filename.startsWith('file://') ? fileURLToPath(filename) : filename;
-  // pkgDir.sync是为了获取 当前参数(地址) 包含package.json的模块目录，也就是会从path.dirname(filename)逐层向上找，直到找到package.json为止所得到的路径。即path.dirname(filename)所在包目录
+  /**
+   * 获取全局目录
+   * 1. pkgDir: 获取 normalizedFilename 包含 package.json 的上级目录
+   * 从 path.dirname(normalizedFilename) 逐层向上找，直到找到 package.json 为止所得到的路径
+   * 即 path.dirname(normalizedFilename) 所在包目录
+   * 2. path.dirname(normalizedFilename) 查找文件的上级目录
+   */
 	const globalDir = pkgDir.sync(path.dirname(normalizedFilename));
   // 找出globalDir与filename的相对路径，也就是以globalDir为参照到filename的路径
 	const relativePath = path.relative(globalDir, normalizedFilename);
   // 拿到filename所在包的package.json
 	const pkg = require(path.join(globalDir, 'package.json'));
-	// !!!核心代码——resolveCwd.silent() 判断当前本地是否有这个文件
+	// !!!核心代码——resolveCwd.silent() 判断当前本地当前路径下是否有这个文件
 	const localFile = resolveCwd.silent(path.join(pkg.name, relativePath));
 	const localNodeModules = path.join(process.cwd(), 'node_modules');
 
@@ -79,7 +87,7 @@ module.exports = filename => {
 		// On Windows, if `localNodeModules` and `normalizedFilename` are on different partitions, `path.relative()` returns the value of `normalizedFilename`, resulting in `filenameInLocalNodeModules` incorrectly becoming `true`.
 		path.parse(localNodeModules).root === path.parse(normalizedFilename).root;
 
-  // 判断本地是否有这个文件，则require()该文件，require就是执行该文件
+  // 本地有这个文件，则require()该文件，require就是执行该文件
 	return !filenameInLocalNodeModules && localFile && path.relative(localFile, normalizedFilename) !== '' && require(localFile);
 };
 ```
@@ -89,3 +97,244 @@ module.exports = filename => {
 ## pkg-dir 源码解析
 
 > 从某个目录开始向上查找，直到找到存在`package.json`的目录，并返回该目录。如果未找到则返回null
+
+```js
+'use strict';
+const path = require('path');
+const findUp = require('find-up');
+
+const pkgDir = async cwd => {
+	const filePath = await findUp('package.json', {cwd});
+	return filePath && path.dirname(filePath);
+};
+
+module.exports = pkgDir;
+
+module.exports.sync = cwd => {
+  // 通过当前文件夹路径 cwd 向上查找 package.json
+	const filePath = findUp.sync('package.json', {cwd});
+	return filePath && path.dirname(filePath);
+};
+```
+
+
+
+## find-up 源码解析
+
+```js
+'use strict';
+const path = require('path');
+const locatePath = require('locate-path');
+const pathExists = require('path-exists');
+
+const stop = Symbol('findUp.stop');
+
+...
+// 同步调用
+module.exports.sync = (name, options = {}) => {
+  // path.resolve: 将两个相对路径进行结合
+	let directory = path.resolve(options.cwd || '');
+  // path.parse: 解析路径
+	const {root} = path.parse(directory);
+  // name 传递过来的文件名称（要查找的文件名）
+	const paths = [].concat(name);
+
+  // locatePath: 在磁盘多个路径中查找第一个存在的路径
+	const runMatcher = locateOptions => {
+		if (typeof name !== 'function') {
+      // 查找当前路径是否存在
+			return locatePath.sync(paths, locateOptions);
+		}
+
+		const foundPath = name(locateOptions.cwd);
+		if (typeof foundPath === 'string') {
+			return locatePath.sync([foundPath], locateOptions);
+		}
+
+		return foundPath;
+	};
+
+	// eslint-disable-next-line no-constant-condition
+	while (true) {
+		const foundPath = runMatcher({...options, cwd: directory});
+
+		if (foundPath === stop) {
+			return;
+		}
+
+		if (foundPath) {
+      // 返回合并路径
+			return path.resolve(directory, foundPath);
+		}
+
+		if (directory === root) {
+			return;
+		}
+
+		directory = path.dirname(directory);
+	}
+};
+
+module.exports.exists = pathExists;
+
+module.exports.sync.exists = pathExists.sync;
+
+module.exports.stop = stop;
+```
+
+
+
+## locate-path 源码解析
+
+```js
+'use strict';
+const path = require('path');
+const fs = require('fs');
+const {promisify} = require('util');
+const pLocate = require('p-locate');
+
+const fsStat = promisify(fs.stat);
+const fsLStat = promisify(fs.lstat);
+
+const typeMappings = {
+	directory: 'isDirectory',
+	file: 'isFile'
+};
+
+function checkType({type}) {
+	if (type in typeMappings) {
+		return;
+	}
+
+	throw new Error(`Invalid type specified: ${type}`);
+}
+
+const matchType = (type, stat) => type === undefined || stat[typeMappings[type]]();
+
+...
+
+module.exports.sync = (paths, options) => {
+	options = {
+		cwd: process.cwd(),
+		allowSymlinks: true,
+		type: 'file',
+		...options
+	};
+	checkType(options);
+	const statFn = options.allowSymlinks ? fs.statSync : fs.lstatSync;
+
+	for (const path_ of paths) {
+		try {
+			const stat = statFn(path.resolve(options.cwd, path_));
+
+			if (matchType(options.type, stat)) {
+				return path_;
+			}
+		} catch (_) {
+		}
+	}
+};
+```
+
+
+
+## path-exists 源码解析
+
+```js
+'use strict';
+const fs = require('fs');
+const {promisify} = require('util');
+
+const pAccess = promisify(fs.access);
+
+...
+
+module.exports.sync = path => {
+	try {
+    // 判断当前文件是否存在
+		fs.accessSync(path);
+		return true;
+	} catch (_) {
+		return false;
+	}
+};
+```
+
+
+
+## resolve-cwd 源码解析
+
+> 主要使用了 `resolve-from` 方法
+
+```js
+'use strict';
+const resolveFrom = require('resolve-from');
+
+// process.cwd() 返回当前执行路径
+module.exports = moduleId => resolveFrom(process.cwd(), moduleId);
+module.exports.silent = moduleId => resolveFrom.silent(process.cwd(), moduleId);
+```
+
+
+
+## resolve-from 源码解析
+
+```js
+'use strict';
+const path = require('path');
+const Module = require('module');
+const fs = require('fs');
+
+const resolveFrom = (fromDirectory, moduleId, silent) => {
+	if (typeof fromDirectory !== 'string') {
+		throw new TypeError(`Expected \`fromDir\` to be of type \`string\`, got \`${typeof fromDirectory}\``);
+	}
+
+	if (typeof moduleId !== 'string') {
+		throw new TypeError(`Expected \`moduleId\` to be of type \`string\`, got \`${typeof moduleId}\``);
+	}
+
+	try {
+    // 同步计算给定路径的规范路径名
+		fromDirectory = fs.realpathSync(fromDirectory);
+	} catch (error) {
+		if (error.code === 'ENOENT') {
+      // 相对路径 => 绝对路径
+			fromDirectory = path.resolve(fromDirectory);
+		} else if (silent) {
+			return;
+		} else {
+			throw error;
+		}
+	}
+
+  // 用当前路径 +  生成文件
+	const fromFile = path.join(fromDirectory, 'noop.js');
+
+	const resolveFileName = () => Module._resolveFilename(moduleId, {
+		id: fromFile,
+		filename: fromFile,
+    // 所有可能的 nodemodules 路径
+		paths: Module._nodeModulePaths(fromDirectory)
+	});
+
+  // 静默情况下如果有异常出现异常不会被抛出
+	if (silent) {
+		try {
+			return resolveFileName();
+		} catch (error) {
+			return;
+		}
+	}
+
+	return resolveFileName();
+};
+
+module.exports = (fromDirectory, moduleId) => resolveFrom(fromDirectory, moduleId);
+module.exports.silent = (fromDirectory, moduleId) => resolveFrom(fromDirectory, moduleId, true);
+```
+
+### Module.\_nodeModulePaths 和 Module.\_resolveFilename 的执行流程
+
+
+
