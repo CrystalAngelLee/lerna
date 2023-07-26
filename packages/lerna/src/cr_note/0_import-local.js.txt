@@ -1,0 +1,35 @@
+'use strict';
+const path = require('path');
+const {fileURLToPath} = require('url');
+const resolveCwd = require('resolve-cwd');
+const pkgDir = require('pkg-dir');
+
+module.exports = filename => {
+	const normalizedFilename = filename.startsWith('file://') ? fileURLToPath(filename) : filename;
+  /**
+   * 获取全局目录
+   * 1. pkgDir: 获取给定文件/目录 normalizedFilename 中包含 package.json 的上级目录
+   * 从 path.dirname(normalizedFilename) 逐层向上找，直到找到 package.json 为止所得到的路径
+   * 即 path.dirname(normalizedFilename) 所在包目录
+   * 2. path.dirname(normalizedFilename) 查找文件的上级目录
+   */
+	const globalDir = pkgDir.sync(path.dirname(normalizedFilename));
+  // 找出globalDir与filename的相对路径，也就是以globalDir为参照到filename的路径
+	const relativePath = path.relative(globalDir, normalizedFilename);
+  // 拿到filename所在包的package.json
+	const pkg = require(path.join(globalDir, 'package.json'));
+  // !!!核心代码——resolveCwd.silent() 判断当前路径下是否有这个文件
+	const localFile = resolveCwd.silent(path.join(pkg.name, relativePath));
+	const localNodeModules = path.join(process.cwd(), 'node_modules');
+
+	const filenameInLocalNodeModules = !path.relative(localNodeModules, normalizedFilename).startsWith('..') &&
+		// On Windows, if `localNodeModules` and `normalizedFilename` are on different partitions, `path.relative()` returns the value of `normalizedFilename`, resulting in `filenameInLocalNodeModules` incorrectly becoming `true`.
+		path.parse(localNodeModules).root === path.parse(normalizedFilename).root;
+
+	// Use `path.relative()` to detect local package installation,
+	// because __filename's case is inconsistent on Windows
+	// Can use `===` when targeting Node.js 8
+	// See https://github.com/nodejs/node/issues/6624
+  // 本地有这个文件，则require()该文件，require就是执行该文件
+	return !filenameInLocalNodeModules && localFile && path.relative(localFile, normalizedFilename) !== '' && require(localFile);
+};

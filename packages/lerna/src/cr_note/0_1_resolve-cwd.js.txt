@@ -1,0 +1,7 @@
+'use strict';
+const resolveFrom = require('resolve-from');
+
+module.exports = moduleId => resolveFrom(process.cwd(), moduleId);
+// 静默方法：有异常也不会被抛出
+// process.cwd() 当前执行文件路径下
+module.exports.silent = moduleId => resolveFrom.silent(process.cwd(), moduleId);

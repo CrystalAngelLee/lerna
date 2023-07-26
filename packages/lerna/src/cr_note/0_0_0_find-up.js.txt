@@ -1,0 +1,61 @@
+'use strict';
+const path = require('path');
+const locatePath = require('locate-path');
+const pathExists = require('path-exists');
+
+const stop = Symbol('findUp.stop');
+
+// 同步调用
+module.exports.sync = (name, options = {}) => {
+  /**
+   * path.resolve: 将两个相对路径进行结合
+   * path.resolve 都相当于 cd 命令 会依次进入
+   * 例如 path.resolve('a', 'b') 就会依次进入 a 文件夹 再进入 b 文件夹
+   */
+	let directory = path.resolve(options.cwd || '');
+  // path.parse: 解析路径
+	const {root} = path.parse(directory);
+  // name 传递过来的文件名称（要查找的文件名）
+	const paths = [].concat(name);
+
+  // locatePath: 在磁盘多个路径中查找第一个存在的路径
+	const runMatcher = locateOptions => {
+		if (typeof name !== 'function') {
+      // 查找当前路径是否存在
+			return locatePath.sync(paths, locateOptions);
+		}
+
+		const foundPath = name(locateOptions.cwd);
+		if (typeof foundPath === 'string') {
+			return locatePath.sync([foundPath], locateOptions);
+		}
+
+		return foundPath;
+	};
+
+	// eslint-disable-next-line no-constant-condition
+	while (true) {
+		const foundPath = runMatcher({...options, cwd: directory});
+
+		if (foundPath === stop) {
+			return;
+		}
+
+		if (foundPath) {
+      // 返回合并路径
+			return path.resolve(directory, foundPath);
+		}
+
+		if (directory === root) {
+			return;
+		}
+
+		directory = path.dirname(directory);
+	}
+};
+
+module.exports.exists = pathExists;
+
+module.exports.sync.exists = pathExists.sync;
+
+module.exports.stop = stop;

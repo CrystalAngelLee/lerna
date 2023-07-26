@@ -1,0 +1,53 @@
+'use strict';
+const path = require('path');
+const Module = require('module');
+const fs = require('fs');
+
+const resolveFrom = (fromDirectory, moduleId, silent) => {
+	if (typeof fromDirectory !== 'string') {
+		throw new TypeError(`Expected \`fromDir\` to be of type \`string\`, got \`${typeof fromDirectory}\``);
+	}
+
+	if (typeof moduleId !== 'string') {
+		throw new TypeError(`Expected \`moduleId\` to be of type \`string\`, got \`${typeof moduleId}\``);
+	}
+
+	try {
+    // https://nodejs.cn/api/fs.html#fsrealpathsyncpath-options
+    // 解析路径名
+		fromDirectory = fs.realpathSync(fromDirectory);
+	} catch (error) {
+		if (error.code === 'ENOENT') {
+      // 处理相对路径 生成 绝对路径
+			fromDirectory = path.resolve(fromDirectory);
+		} else if (silent) {
+			return;
+		} else {
+			throw error;
+		}
+	}
+
+	const fromFile = path.join(fromDirectory, 'noop.js');
+
+  // 计算绝对路径
+	const resolveFileName = () => Module._resolveFilename(moduleId, {
+		id: fromFile,
+		filename: fromFile,
+    // 所有可能的 node_modules 路径
+		paths: Module._nodeModulePaths(fromDirectory)
+	});
+
+  // 静默情况下如果有异常出现异常不会被抛出
+	if (silent) {
+		try {
+			return resolveFileName();
+		} catch (error) {
+			return;
+		}
+	}
+
+	return resolveFileName();
+};
+
+module.exports = (fromDirectory, moduleId) => resolveFrom(fromDirectory, moduleId);
+module.exports.silent = (fromDirectory, moduleId) => resolveFrom(fromDirectory, moduleId, true);

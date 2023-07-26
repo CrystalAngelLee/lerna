@@ -1,0 +1,10 @@
+'use strict';
+const path = require('path');
+const findUp = require('find-up');
+
+module.exports.sync = cwd => {
+  // cwd 当前目录
+  // 通过当前文件夹路径 cwd 向上查找 package.json
+	const filePath = findUp.sync('package.json', {cwd});
+	return filePath && path.dirname(filePath);
+};

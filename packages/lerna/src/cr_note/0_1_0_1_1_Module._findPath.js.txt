@@ -1,0 +1,92 @@
+const trailingSlashRegex = /(?:^|\/)\.?\.$/;
+Module._findPath = function(request, paths, isMain) {
+  // 是否为绝对路径
+  const absoluteRequest = path.isAbsolute(request);
+  if (absoluteRequest) {
+    paths = [''];
+  } else if (!paths || paths.length === 0) {
+    return false;
+  }
+
+  // 生成缓存Key 通过 '\x00' -> 空格 进行组合  后续可以根据 '\x00' 进行split分割
+  const cacheKey = request + '\x00' + ArrayPrototypeJoin(paths, '\x00');
+  const entry = Module._pathCache[cacheKey];
+  if (entry)
+    return entry;
+
+  let exts;
+  // 当前路径是否反斜杠结尾
+  let trailingSlash = request.length > 0 &&
+    StringPrototypeCharCodeAt(request, request.length - 1) ===
+    CHAR_FORWARD_SLASH;
+  if (!trailingSlash) {
+    // 判断是都是相对路径 匹配最终结尾数据是否是 /.. /. .. . 这些形式
+    trailingSlash = RegExpPrototypeTest(trailingSlashRegex, request);
+  }
+
+  // For each path
+  for (let i = 0; i < paths.length; i++) {
+    // Don't search further if path doesn't exist
+    const curPath = paths[i];
+    // 判断是否是文件夹 stat 返回 1：文件夹 0：文件 -2：不存在
+    if (curPath && stat(curPath) < 1) continue;
+
+    if (!absoluteRequest) {
+      const exportsResolved = resolveExports(curPath, request);
+      if (exportsResolved)
+        return exportsResolved;
+    }
+
+    const basePath = path.resolve(curPath, request);
+    let filename;
+
+    // 判断文件是否存在
+    const rc = stat(basePath);
+    if (!trailingSlash) {
+      if (rc === 0) {  // File.
+        if (!isMain) {
+          // 是否阻止做超链接
+          if (preserveSymlinks) {
+            filename = path.resolve(basePath);
+          } else {
+            // !!!软连接生成最终路径
+            filename = toRealPath(basePath);
+          }
+        } else if (preserveSymlinksMain) {
+          // For the main module, we use the preserveSymlinksMain flag instead
+          // mainly for backward compatibility, as the preserveSymlinks flag
+          // historically has not applied to the main module.  Most likely this
+          // was intended to keep .bin/ binaries working, as following those
+          // symlinks is usually required for the imports in the corresponding
+          // files to resolve; that said, in some use cases following symlinks
+          // causes bigger problems which is why the preserveSymlinksMain option
+          // is needed.
+          filename = path.resolve(basePath);
+        } else {
+          filename = toRealPath(basePath);
+        }
+      }
+
+      if (!filename) {
+        // Try it with each of the extensions
+        if (exts === undefined)
+          exts = ObjectKeys(Module._extensions);
+        filename = tryExtensions(basePath, exts, isMain);
+      }
+    }
+
+    if (!filename && rc === 1) {  // Directory.
+      // try it with each of the extensions at "index"
+      if (exts === undefined)
+        exts = ObjectKeys(Module._extensions);
+      filename = tryPackage(basePath, exts, isMain, request);
+    }
+
+    if (filename) {
+      Module._pathCache[cacheKey] = filename;
+      return filename;
+    }
+  }
+
+  return false;
+}

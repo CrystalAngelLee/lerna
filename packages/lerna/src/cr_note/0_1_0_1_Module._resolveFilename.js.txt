@@ -1,0 +1,93 @@
+Module._resolveFilename = function(request, parent, isMain, options) {
+  // 是否为可以加载的内置模块
+  if (StringPrototypeStartsWith(request, 'node:') ||
+      NativeModule.canBeRequiredByUsers(request)) {
+    return request;
+  }
+
+  let paths;
+
+  if (typeof options === 'object' && options !== null) {
+    if (ArrayIsArray(options.paths)) {
+      const isRelative = StringPrototypeStartsWith(request, './') ||
+          StringPrototypeStartsWith(request, '../') ||
+          ((isWindows && StringPrototypeStartsWith(request, '.\\')) ||
+          StringPrototypeStartsWith(request, '..\\'));
+
+      if (isRelative) {
+        paths = options.paths;
+      } else {
+        const fakeParent = new Module('', null);
+
+        paths = [];
+
+        for (let i = 0; i < options.paths.length; i++) {
+          const path = options.paths[i];
+          fakeParent.paths = Module._nodeModulePaths(path);
+          const lookupPaths = Module._resolveLookupPaths(request, fakeParent);
+
+          for (let j = 0; j < lookupPaths.length; j++) {
+            if (!ArrayPrototypeIncludes(paths, lookupPaths[j]))
+              ArrayPrototypePush(paths, lookupPaths[j]);
+          }
+        }
+      }
+    } else if (options.paths === undefined) {
+      paths = Module._resolveLookupPaths(request, parent);
+    } else {
+      throw new ERR_INVALID_OPT_VALUE('options.paths', options.paths);
+    }
+  } else {
+    // 查找更全的path
+    paths = Module._resolveLookupPaths(request, parent);
+  }
+
+  if (parent && parent.filename) {
+    if (request[0] === '#') {
+      const pkg = readPackageScope(parent.filename) || {};
+      if (pkg.data && pkg.data.imports !== null &&
+          pkg.data.imports !== undefined) {
+        try {
+          return finalizeEsmResolution(
+            packageImportsResolve(request, pathToFileURL(parent.filename),
+                                  cjsConditions), request, parent.filename,
+            pkg.path);
+        } catch (e) {
+          if (e.code === 'ERR_MODULE_NOT_FOUND')
+            throw createEsmNotFoundErr(request);
+          throw e;
+        }
+      }
+    }
+  }
+
+  // Try module self resolution first
+  const parentPath = trySelfParentPath(parent);
+  const selfResolved = trySelf(parentPath, request);
+  if (selfResolved) {
+    const cacheKey = request + '\x00' +
+         (paths.length === 1 ? paths[0] : ArrayPrototypeJoin(paths, '\x00'));
+    Module._pathCache[cacheKey] = selfResolved;
+    return selfResolved;
+  }
+
+  // Look up the filename first, since that's the cache key.
+  const filename = Module._findPath(request, paths, isMain, false);
+  if (filename) return filename;
+  const requireStack = [];
+  for (let cursor = parent;
+    cursor;
+    cursor = cursor.parent) {
+    ArrayPrototypePush(requireStack, cursor.filename || cursor.id);
+  }
+  let message = `Cannot find module '${request}'`;
+  if (requireStack.length > 0) {
+    message = message + '\nRequire stack:\n- ' +
+              ArrayPrototypeJoin(requireStack, '\n- ');
+  }
+  // eslint-disable-next-line no-restricted-syntax
+  const err = new Error(message);
+  err.code = 'MODULE_NOT_FOUND';
+  err.requireStack = requireStack;
+  throw err;
+};

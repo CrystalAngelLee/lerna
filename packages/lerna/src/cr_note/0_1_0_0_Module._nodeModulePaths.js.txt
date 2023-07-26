@@ -1,0 +1,47 @@
+// 'node_modules' character codes reversed
+const nmChars = [ 115, 101, 108, 117, 100, 111, 109, 95, 101, 100, 111, 110 ];
+const nmLen = nmChars.length;
+
+Module._nodeModulePaths = function(from) {
+  // Guarantee that 'from' is absolute.
+  from = path.resolve(from);
+  // Return early not only to avoid unnecessary work, but to *avoid* returning
+  // an array of two items for a root: [ '//node_modules', '/node_modules' ]
+  // 判断路径是否为根路径
+  if (from === '/')
+    return ['/node_modules'];
+
+  // note: this approach *only* works when the path is guaranteed
+  // to be absolute.  Doing a fully-edge-case-correct path.split
+  // that works on both Windows and Posix is non-trivial.
+  const paths = [];
+  // 遍历各级目录 在目录后添加 /node_modules
+  // !!!p 用来判断当前字符串是否和 node_modules 相等
+  for (let i = from.length - 1, p = 0, last = from.length; i >= 0; --i) {
+    // 转换为 charcode
+    const code = StringPrototypeCharCodeAt(from, i);
+    // 判断是否为 CHAR_FORWARD_SLASH => 47 '/'
+    if (code === CHAR_FORWARD_SLASH) {
+      // paths.push(from.slice(0, last) + '/node_modules')
+      if (p !== nmLen)
+        ArrayPrototypePush(
+          paths,
+          StringPrototypeSlice(from, 0, last) + '/node_modules'
+        ); // 推入带有node_modules的路径
+      last = i;
+      p = 0;
+    } else if (p !== -1) {
+      // 如果当前字符串===node_modules 执行跳过
+      if (nmChars[p] === code) {
+        ++p;
+      } else {
+        p = -1;
+      }
+    }
+  }
+
+  // Append /node_modules to handle root paths.
+  ArrayPrototypePush(paths, '/node_modules');
+
+  return paths;
+};

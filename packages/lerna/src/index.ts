@@ -31,6 +31,7 @@ module.exports = function main(argv: NodeJS.Process["argv"]) {
     lernaVersion: pkg.version,
   };
 
+  // CR-NOTE: 使用 yargs 实现
   const cli = lernaCLI()
     /**
      * CR-NOTE：命令
